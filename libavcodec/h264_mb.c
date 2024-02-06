@@ -804,6 +804,10 @@ void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
     int is_complex    = CONFIG_SMALL || sl->is_complex ||
                         IS_INTRA_PCM(mb_type) || sl->qscale == 0;
 
+    // videoparser
+    SharedFrameInfo *sf;
+    int qp, qp_sqr;
+
     if (CHROMA444(h)) {
         if (is_complex || h->pixel_shift)
             hl_decode_mb_444_complex(h, sl);
@@ -815,4 +819,22 @@ void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
         hl_decode_mb_simple_16(h, sl);
     } else
         hl_decode_mb_simple_8(h, sl);
+
+    // videoparser
+    // sum up QP statistics
+    // TODO: replace with black border filtered values
+    // TODO: enacapsulate this logic in a function because it is the same across all decoders
+    sf = &h->cur_pic_ptr->f->shared_frame_info;
+    qp = sl->qscale;
+    qp_sqr = qp * qp;
+
+    sf->qp_init = sf->qp_cnt == 0 ? qp : sf->qp_init;
+    sf->qp_sum += qp;
+    sf->qp_sum_sqr += qp_sqr;
+    sf->qp_cnt += 1;
+    sf->qp_sum_bb += qp;
+    sf->qp_sum_sqr_bb += qp_sqr;
+    sf->qp_cnt_bb += 1;
+    sf->qp_min = FFMIN(sf->qp_min, qp);
+    sf->qp_max = FFMAX(sf->qp_max, qp);
 }

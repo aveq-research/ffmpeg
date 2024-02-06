@@ -37,6 +37,7 @@
 #include "pixfmt.h"
 #include "version.h"
 
+#include "../../../VideoParser/include/shared.h" // videoparser
 
 /**
  * @defgroup lavu_frame AVFrame
@@ -805,8 +806,22 @@ typedef struct AVFrame {
      * Duration of the frame, in the same units as pts. 0 if unknown.
      */
     int64_t duration;
+
+    /**
+     * videoparser
+     * Shared frame info by videoparser to be extracted later.
+     */
+    SharedFrameInfo shared_frame_info;
 } AVFrame;
 
+/**
+ * @brief Get the Shared Frame Info object, with some calculations applied
+ * before returning it to the videoparser.
+ *
+ * @param frame The frame to get the shared frame info from.
+ * @return SharedFrameInfo*
+ */
+SharedFrameInfo *av_frame_get_shared_frame_info(AVFrame *frame);
 
 /**
  * Allocate an AVFrame and set its fields to default values.  The resulting

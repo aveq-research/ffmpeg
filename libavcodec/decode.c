@@ -820,6 +820,7 @@ int ff_decode_receive_frame(AVCodecContext *avctx, AVFrame *frame)
     }
 
     avctx->frame_num++;
+    frame->shared_frame_info.frame_idx = avctx->frame_num;
 #if FF_API_AVCTX_FRAME_NUMBER
 FF_DISABLE_DEPRECATION_WARNINGS
     avctx->frame_number = avctx->frame_num;

@@ -64,6 +64,23 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->color_range         = AVCOL_RANGE_UNSPECIFIED;
     frame->chroma_location     = AVCHROMA_LOC_UNSPECIFIED;
     frame->flags               = 0;
+
+    // videoparser
+    // initialize default values for the shared frame info
+    frame->shared_frame_info.frame_idx = -1;
+    frame->shared_frame_info.qp_sum = 0;
+    frame->shared_frame_info.qp_sum_sqr = 0;
+    frame->shared_frame_info.qp_cnt = 0;
+    frame->shared_frame_info.qp_sum_bb = 0;
+    frame->shared_frame_info.qp_sum_sqr_bb = 0;
+    frame->shared_frame_info.qp_cnt_bb = 0;
+    frame->shared_frame_info.qp_min = UINT32_MAX;
+    frame->shared_frame_info.qp_max = 0;
+    frame->shared_frame_info.qp_init = 0;
+    frame->shared_frame_info.qp_avg = 0;
+    frame->shared_frame_info.qp_stdev = 0;
+    frame->shared_frame_info.qp_bb_avg = 0;
+    frame->shared_frame_info.qp_bb_stdev = 0;
 }
 
 static void free_side_data(AVFrameSideData **ptr_sd)
@@ -352,6 +369,10 @@ FF_ENABLE_DEPRECATION_WARNINGS
         }
         av_dict_copy(&sd_dst->metadata, sd_src->metadata, 0);
     }
+
+    // videoparser
+    // copy over extra field
+    dst->shared_frame_info = src->shared_frame_info;
 
     ret = av_buffer_replace(&dst->opaque_ref, src->opaque_ref);
     ret |= av_buffer_replace(&dst->private_ref, src->private_ref);
@@ -851,6 +872,10 @@ static int frame_copy_video(AVFrame *dst, const AVFrame *src)
                    src->data, src->linesize,
                    dst->format, src->width, src->height);
 
+    // videoparser
+    // copy over extra field
+    dst->shared_frame_info = src->shared_frame_info;
+
     return 0;
 }
 
@@ -1057,4 +1082,17 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
     frame->crop_bottom = 0;
 
     return 0;
+}
+
+SharedFrameInfo *av_frame_get_shared_frame_info(AVFrame *frame)
+{
+    SharedFrameInfo *s = &frame->shared_frame_info;
+
+    // calculate final QP statistics from internal fields
+    s->qp_avg = s->qp_sum / s->qp_cnt;
+    s->qp_stdev = sqrt(s->qp_sum_sqr / s->qp_cnt - s->qp_avg * s->qp_avg);
+    s->qp_bb_avg = s->qp_sum_bb / s->qp_cnt_bb;
+    s->qp_bb_stdev = sqrt(s->qp_sum_sqr_bb / s->qp_cnt_bb - s->qp_bb_avg * s->qp_bb_avg);
+
+    return s;
 }

@@ -1554,6 +1554,10 @@ static int vp9_export_enc_params(VP9Context *s, VP9Frame *frame)
 static int vp9_decode_frame(AVCodecContext *avctx, AVFrame *frame,
                             int *got_frame, AVPacket *pkt)
 {
+    // videoparser
+    SharedFrameInfo *sf;
+    int qp, qp_sqr;
+
     const uint8_t *data = pkt->data;
     int size = pkt->size;
     VP9Context *s = avctx->priv_data;
@@ -1779,6 +1783,21 @@ finish:
             return ret;
         *got_frame = 1;
     }
+
+    // videoparser
+    qp = s->s.h.yac_qi; // y-ac qp, (y-dc qp and uv qp are disregarded)
+    qp_sqr = qp * qp;
+
+    sf = &frame->shared_frame_info;
+    sf->qp_init = sf->qp_cnt == 0 ? qp : sf->qp_init;
+    sf->qp_sum += qp;
+    sf->qp_sum_sqr += qp_sqr;
+    sf->qp_cnt += 1;
+    sf->qp_sum_bb += qp;
+    sf->qp_sum_sqr_bb += qp_sqr;
+    sf->qp_cnt_bb += 1;
+    sf->qp_min = FFMIN(sf->qp_min, qp);
+    sf->qp_max = FFMAX(sf->qp_max, qp);
 
     return pkt->size;
 }

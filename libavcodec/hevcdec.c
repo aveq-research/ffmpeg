@@ -2229,6 +2229,10 @@ static void intra_prediction_unit_default_value(HEVCLocalContext *lc,
 
 static int hls_coding_unit(HEVCLocalContext *lc, const HEVCContext *s, int x0, int y0, int log2_cb_size)
 {
+    // videoparser
+    SharedFrameInfo *sf;
+    int qp, qp_sqr;
+
     int cb_size          = 1 << log2_cb_size;
     int log2_min_cb_size = s->ps.sps->log2_min_cb_size;
     int length           = cb_size >> log2_min_cb_size;
@@ -2378,6 +2382,24 @@ static int hls_coding_unit(HEVCLocalContext *lc, const HEVCContext *s, int x0, i
         memset(&s->qp_y_tab[x], lc->qp_y, length);
         x += min_cb_width;
     }
+
+    // videoparser
+    // sum up QP statistics
+    // TODO estimate black border
+    // TODO: enacapsulate this logic in a function because it is the same across all decoders
+    sf = &s->frame->shared_frame_info;
+    qp = lc->qp_y;
+    qp_sqr = qp * qp;
+
+    sf->qp_init = sf->qp_cnt == 0 ? qp : sf->qp_init;
+    sf->qp_sum += qp;
+    sf->qp_sum_sqr += qp_sqr;
+    sf->qp_cnt += 1;
+    sf->qp_sum_bb += qp;
+    sf->qp_sum_sqr_bb += qp_sqr;
+    sf->qp_cnt_bb += 1;
+    sf->qp_min = FFMIN(sf->qp_min, qp);
+    sf->qp_max = FFMAX(sf->qp_max, qp);
 
     if(((x0 + (1<<log2_cb_size)) & qp_block_mask) == 0 &&
        ((y0 + (1<<log2_cb_size)) & qp_block_mask) == 0) {
