@@ -1549,10 +1549,16 @@ static int decode_cabac_mb_mvd(H264SliceContext *sl, int ctxbase, int amvd, int 
 \
     int mxd = decode_cabac_mb_mvd(sl, 40, amvd0, &mpx);\
     int myd = decode_cabac_mb_mvd(sl, 47, amvd1, &mpy);\
+    sl->cabac.bit_count = 0; /* // videoparser: Reset bit_count after MVD decoding */\
     if (mxd == INT_MIN || myd == INT_MIN) \
         return AVERROR_INVALIDDATA; \
     mx += mxd;\
     my += myd;\
+    /* // videoparser: Update motion vector statistics */\
+    h->cur_pic_ptr->f->shared_frame_info.motion_bit_count += sl->cabac.bit_count; \
+    h->cur_pic_ptr->f->shared_frame_info.mv_coded_count++; \
+    mpx = (mpx > 127) ? 127 : ((mpx < -128) ? -128 : mpx); \
+    mpy = (mpy > 127) ? 127 : ((mpy < -128) ? -128 : mpy); \
 }
 
 static av_always_inline int get_cabac_cbf_ctx(H264SliceContext *sl,
@@ -2433,6 +2439,7 @@ decode_intra_mb:
             scan    = sl->qscale ? h->zigzag_scan : h->zigzag_scan_q0;
         }
 
+        sl->cabac.bit_count = 0; // videoparser
         decode_cabac_luma_residual(h, sl, scan, scan8x8, pixel_shift, mb_type, cbp, 0);
         if (CHROMA444(h)) {
             decode_cabac_luma_residual(h, sl, scan, scan8x8, pixel_shift, mb_type, cbp, 1);
@@ -2493,7 +2500,10 @@ decode_intra_mb:
     }
 
     h->cur_pic.qscale_table[mb_xy] = sl->qscale;
+    h->cur_pic_ptr->f->shared_frame_info.coefs_bit_count += sl->cabac.bit_count; // videoparser
     write_back_non_zero_count(h, sl);
+
+    memcpy(sl->mb0, sl->mb, sizeof(sl->mb)); // videoparser
 
     return 0;
 }

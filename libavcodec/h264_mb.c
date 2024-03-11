@@ -797,6 +797,102 @@ static av_always_inline void hl_decode_mb_idct_luma(const H264Context *h, H264Sl
 #define SIMPLE 0
 #include "h264_mb_template.c"
 
+// videoparser
+#define SQR(_x_)  (_x_)*(_x_)
+
+// Function MV_Statistics264 copied from bitstream_mode3_p1204_3 and modified for new parser (motion vector extraction)
+static void mv_statistics_264(SharedFrameInfo* sf, H264SliceContext* sl, uint32_t curr_type, uint16_t* subtypes, 
+                              uint8_t(*motion_L0)[2], uint8_t(*motion_L1)[2], 
+                              uint8_t(*motion_diff_L0)[2], uint8_t(*motion_diff_L1)[2], 
+                              uint8_t* ref_L0, uint8_t* ref_L1, int width, int sub_stride, int frame_type) {
+    int blk4, blk8, mv_idx, dir_cnt;
+    int ref_0_poc, ref_1_poc;
+    int is_fwd, is_bwd;
+    double norm_fwd, norm_bwd;
+    double mv_length_xy;
+    double mv_x, mv_y, mv_diff_x, mv_diff_y;
+
+    curr_type = curr_type & 0xffff;
+
+    for (blk8 = 0; blk8 < 4; blk8++) {
+        sf->mb_mv_count += 4; // Includes DIRECT mode where no motion is coded, but default prediction is used
+        ref_0_poc = sl->ref_list[0][ref_L0[scan8[blk8<<2]]].poc - ((sl->ref_list[0][ref_L0[scan8[blk8<<2]]].poc > 32768) ? 65536 : 0);
+        ref_1_poc = sl->ref_list[1][ref_L1[scan8[blk8<<2]]].poc - ((sl->ref_list[1][ref_L1[scan8[blk8<<2]]].poc > 32768) ? 65536 : 0);
+
+        if ((curr_type & MB_TYPE_L0) || (curr_type & MB_TYPE_DIRECT2)) {
+            norm_fwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_0_poc) / sf->poc_diff));
+        }
+            
+        if ((curr_type & MB_TYPE_L1) || (curr_type & MB_TYPE_DIRECT2)) {
+            norm_bwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_1_poc) / sf->poc_diff));
+        } 
+
+        curr_type = ((frame_type == AV_PICTURE_TYPE_B) && (curr_type & MB_TYPE_8x8)) ? subtypes[(blk8 & 1) + (int)(blk8 > 1)*sub_stride] : curr_type;
+
+        is_fwd = ((curr_type & MB_TYPE_16x16) && (curr_type & MB_TYPE_P0L0))
+            || ((curr_type & MB_TYPE_8x8) && (curr_type & MB_TYPE_L0))
+            || ((curr_type & MB_TYPE_16x8) && (((blk8 < 2) && (curr_type & MB_TYPE_P0L0)) || ((blk8 > 1) && (curr_type & MB_TYPE_P1L0))))
+            || ((curr_type & MB_TYPE_8x16) && ((!(blk8 & 1) && (curr_type & MB_TYPE_P0L0)) || ((blk8 & 1) && (curr_type & MB_TYPE_P1L0))));
+
+        is_bwd = ((curr_type & MB_TYPE_16x16) && (curr_type & MB_TYPE_P0L1))
+            || ((curr_type & MB_TYPE_8x8) && (curr_type & MB_TYPE_L1))
+            || ((curr_type & MB_TYPE_16x8) && (((blk8 < 2) && (curr_type & MB_TYPE_P0L1)) || ((blk8 > 1) && (curr_type & MB_TYPE_P1L1))))
+            || ((curr_type & MB_TYPE_8x16) && ((!(blk8 & 1) && (curr_type & MB_TYPE_P0L1)) || ((blk8 & 1) && (curr_type & MB_TYPE_P1L1))));
+
+        if (is_fwd && ((sf->current_poc - ref_0_poc) == 0)) {
+            ref_0_poc = ref_0_poc;
+        }
+            
+        if (is_bwd && ((sf->current_poc - ref_1_poc) == 0)) {
+            ref_1_poc = ref_1_poc;
+        }
+
+        for (blk4 = 0; blk4 < 4; blk4++) {
+            mv_idx = scan8[(blk8 << 2) + blk4];
+            mv_x = mv_y = mv_diff_x = mv_diff_y = dir_cnt = 0;
+            if (is_fwd) {
+                dir_cnt++;
+                mv_x = fabs(motion_L0[mv_idx][0]) * norm_fwd;
+                mv_y = fabs(motion_L0[mv_idx][1]) * norm_fwd;
+                mv_diff_x = fabs(motion_diff_L0[mv_idx][0]) * norm_fwd;
+                mv_diff_y = fabs(motion_diff_L0[mv_idx][1]) * norm_fwd;
+                mv_diff_x = (mv_diff_x > 127) ? mv_diff_x - 255 : mv_diff_x;
+                mv_diff_y = (mv_diff_y > 127) ? mv_diff_y - 255 : mv_diff_y;
+                mv_diff_x = fabs(mv_diff_x);
+                mv_diff_y = fabs(mv_diff_y);
+            }
+
+            if (is_bwd) { 
+                dir_cnt++;
+                mv_x += fabs(motion_L1[mv_idx][0]) * norm_bwd;
+                mv_y += fabs(motion_L1[mv_idx][1]) * norm_bwd;
+                mv_diff_x += fabs(motion_diff_L1[mv_idx][0]) * norm_bwd;
+                mv_diff_y += fabs(motion_diff_L1[mv_idx][1]) * norm_bwd;
+                mv_diff_x = (mv_diff_x > 127) ? mv_diff_x - 255 : mv_diff_x;
+                mv_diff_y = (mv_diff_y > 127) ? mv_diff_y - 255 : mv_diff_y;
+                mv_diff_x = fabs(mv_diff_x);
+                mv_diff_y = fabs(mv_diff_y);
+            }
+
+            if (dir_cnt) {
+                mv_x /= dir_cnt;
+                mv_y /= dir_cnt;
+                mv_diff_x /= dir_cnt;
+                mv_diff_y /= dir_cnt;
+                mv_length_xy = sqrt(SQR(mv_x) + SQR(mv_y));
+                sf->mv_length += mv_length_xy; // Add up of motion vector length for mean value
+                // sf->MV_dLength += mv_length_diff_xy; // Add up of motion vector length for mean value, MV_dLength doesn't exist anymore
+                sf->mv_sum_sqr += SQR(mv_length_xy); //Add up square of motion vector length for variance value
+                // sf->MV_DifSumSQR += pow(mv_length_diff_xy, 2.0); // MV_DifSumSQR doesn't exist anymore
+                sf->mv_x_length += mv_x;
+                sf->mv_y_length += mv_y;
+                sf->mv_x_sum_sqr += SQR(mv_x);
+                sf->mv_y_sum_sqr += SQR(mv_y);
+            }
+        }
+    }
+}
+
 void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
 {
     const int mb_xy   = sl->mb_xy;
@@ -807,6 +903,8 @@ void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
     // videoparser
     SharedFrameInfo *sf;
     int qp, qp_sqr;
+    H264Picture *curr_pic;
+    int mb_type_I, frame_type;
 
     if (CHROMA444(h)) {
         if (is_complex || h->pixel_shift)
@@ -837,4 +935,89 @@ void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
     sf->qp_cnt_bb += 1;
     sf->qp_min = FFMIN(sf->qp_min, qp);
     sf->qp_max = FFMAX(sf->qp_max, qp);
+
+    // Motion vectors
+    curr_pic = h->cur_pic_ptr;
+    frame_type = curr_pic->f->pict_type;
+
+    if (mb_type != 0) {
+        mb_type_I = (int)((mb_type & 0x7) != 0);
+        if ((frame_type != AV_PICTURE_TYPE_I) && !mb_type_I) { 
+            if (!(mb_type & MB_TYPE_SKIP)) {
+                mv_statistics_264(sf, sl, mb_type, sl->sub_mb_type,
+                                  (uint8_t (*)[2]) sl->mv_cache[0], (uint8_t (*)[2]) sl->mv_cache[1], 
+                                  (uint8_t (*)[2]) sl->mvd_cache[0], (uint8_t (*)[2]) sl->mvd_cache[1], 
+                                  sl->ref_cache[0], sl->ref_cache[1], h->mb_width<<2, (h->mb_stride << 1), frame_type);
+            }
+        }
+    }
+
+    // TODO: Fix or remove
+    // This was an initial attempt to extract motion vectors from the bitstream, but sd is never populated.
+    // The insipiration for the code was taken from doc/examples/extract_mvs.c.
+    // The calculations for mv values may not be correct, but it's not possible to debug since sd is null.
+    // The code is left here for reference.
+    /*
+    sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+
+    if (sd) {
+        const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
+        int num_vectors = sd->size / sizeof(*mvs);
+        MotionVector *motion_vectors = malloc(num_vectors * sizeof(MotionVector));
+
+        for (int i = 0; i < num_vectors; i++) {
+            const AVMotionVector *mv = &mvs[i];
+            int motion_x = mv->motion_x / 16;
+            int motion_y = mv->motion_y / 16;
+            motion_vectors[i].motion_x = motion_x;
+            motion_vectors[i].motion_y = motion_y;
+        }
+
+        // Calculate lengths
+        lengths = malloc(num_vectors * sizeof(double));
+        for (int i = 0; i < num_vectors; i++) {
+            lengths[i] = sqrt(pow(motion_vectors[i].motion_x, 2) + pow(motion_vectors[i].motion_y, 2));
+            motion_avg += lengths[i];
+        }
+        motion_avg /= num_vectors;
+
+        // Calculate motion_stdev
+        for (int i = 0; i < num_vectors; i++) {
+            motion_stdev += pow(lengths[i] - motion_avg, 2);
+        }
+        motion_stdev = sqrt(motion_stdev / num_vectors);
+
+        free(lengths);
+
+        // Calculate motion_x_avg, motion_y_avg, motion_x_stdev, motion_y_stdev
+        for (int i = 0; i < num_vectors; i++) {
+            motion_x_avg += motion_vectors[i].motion_x;
+            motion_y_avg += motion_vectors[i].motion_y;
+        }
+        motion_x_avg /= num_vectors;
+        motion_y_avg /= num_vectors;
+
+        for (int i = 0; i < num_vectors; i++) {
+            motion_x_stdev += pow(motion_vectors[i].motion_x - motion_x_avg, 2);
+            motion_y_stdev += pow(motion_vectors[i].motion_y - motion_y_avg, 2);
+        }
+        motion_x_stdev = sqrt(motion_x_stdev / num_vectors);
+        motion_y_stdev = sqrt(motion_y_stdev / num_vectors);
+
+        free(motion_vectors);
+
+        // Motion Difference (assuming zero predictor for simplicity)
+        motion_diff_avg = motion_avg;
+        motion_diff_stdev = motion_stdev;
+
+        // Store in SharedFrameInfo
+        sf->motion_avg = motion_avg;
+        sf->motion_stdev = motion_stdev;
+        sf->motion_x_avg = motion_x_avg;
+        sf->motion_y_avg = motion_y_avg;
+        sf->motion_x_stdev = motion_x_stdev;
+        sf->motion_y_stdev = motion_y_stdev;
+        sf->motion_diff_avg = motion_diff_avg;
+        sf->motion_diff_stdev = motion_diff_stdev;
+    }*/
 }

@@ -74,6 +74,12 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->shared_frame_info.qp_sum_bb = 0;
     frame->shared_frame_info.qp_sum_sqr_bb = 0;
     frame->shared_frame_info.qp_cnt_bb = 0;
+    frame->shared_frame_info.mv_length = 0;
+    frame->shared_frame_info.mv_sum_sqr = 0;
+    frame->shared_frame_info.mv_x_length = 0;
+    frame->shared_frame_info.mv_y_length = 0;
+    frame->shared_frame_info.mv_x_sum_sqr = 0;
+    frame->shared_frame_info.mv_y_sum_sqr = 0;
     frame->shared_frame_info.qp_min = UINT32_MAX;
     frame->shared_frame_info.qp_max = 0;
     frame->shared_frame_info.qp_init = 0;
@@ -81,6 +87,20 @@ FF_ENABLE_DEPRECATION_WARNINGS
     frame->shared_frame_info.qp_stdev = 0;
     frame->shared_frame_info.qp_bb_avg = 0;
     frame->shared_frame_info.qp_bb_stdev = 0;
+    frame->shared_frame_info.motion_avg = 0;
+    frame->shared_frame_info.motion_stdev = 0;
+    frame->shared_frame_info.motion_x_avg = 0;
+    frame->shared_frame_info.motion_x_stdev = 0;
+    frame->shared_frame_info.motion_y_avg = 0;
+    frame->shared_frame_info.motion_y_stdev = 0;
+    frame->shared_frame_info.motion_diff_avg = 0;
+    frame->shared_frame_info.motion_diff_stdev = 0;
+    frame->shared_frame_info.current_poc = 0;
+    frame->shared_frame_info.poc_diff = 0;
+    frame->shared_frame_info.motion_bit_count = 0;
+    frame->shared_frame_info.coefs_bit_count = 0;
+    frame->shared_frame_info.mb_mv_count = 0;
+    frame->shared_frame_info.mv_coded_count = 0;
 }
 
 static void free_side_data(AVFrameSideData **ptr_sd)
@@ -1084,15 +1104,40 @@ int av_frame_apply_cropping(AVFrame *frame, int flags)
     return 0;
 }
 
+
+// Videoparser
+#define SQR(_x_)  (_x_)*(_x_)
+
 SharedFrameInfo *av_frame_get_shared_frame_info(AVFrame *frame)
 {
     SharedFrameInfo *s = &frame->shared_frame_info;
+    int num_motion, num_diffs, frame_type;
 
     // calculate final QP statistics from internal fields
     s->qp_avg = s->qp_sum / s->qp_cnt;
     s->qp_stdev = sqrt(s->qp_sum_sqr / s->qp_cnt - s->qp_avg * s->qp_avg);
     s->qp_bb_avg = s->qp_sum_bb / s->qp_cnt_bb;
     s->qp_bb_stdev = sqrt(s->qp_sum_sqr_bb / s->qp_cnt_bb - s->qp_bb_avg * s->qp_bb_avg);
+
+    // Calculate motion vector statistics
+    frame_type = frame->pict_type;
+    if (frame_type != AV_PICTURE_TYPE_I) {
+        num_motion = s->mb_mv_count;
+        num_diffs = num_motion;
+
+        if (num_motion > 0) {
+            s->motion_avg = s->mv_length / num_motion;
+            // TODO: Figure out how to best calculate motion_diff_avg (MV_dLength doesn't exist anymore)
+            // s->motion_diff_avg = s->MV_dLength / num_diffs;
+            s->motion_x_avg = s->mv_x_length / num_motion;
+            s->motion_y_avg = s->mv_y_length / num_motion;
+            s->motion_x_stdev = sqrt(0.00001 + s->mv_x_sum_sqr / num_motion - SQR(s->mv_x_length / num_motion));
+            s->motion_y_stdev = sqrt(0.00001 + s->mv_y_sum_sqr / num_motion - SQR(s->mv_y_length / num_motion));
+            s->motion_stdev = sqrt(0.00001 + s->mv_sum_sqr / num_motion - SQR(s->mv_length / num_motion));
+            // TODO: Figure out how to best calculate motion_diff_stdev (MV_DifSumSQR and MV_DifSum don't exist anymore)
+            // s->motion_diff_stdev = sqrt(0.00001 + s->MV_DifSumSQR / num_diffs - pow(s->MV_DifSum / num_diffs, 2.0));
+        }
+    }
 
     return s;
 }
