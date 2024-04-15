@@ -1128,14 +1128,14 @@ SharedFrameInfo *av_frame_get_shared_frame_info(AVFrame *frame)
         if (num_motion > 0) {
             s->motion_avg = s->mv_length / num_motion;
             // TODO: Figure out how to best calculate motion_diff_avg (MV_dLength doesn't exist anymore)
-            // s->motion_diff_avg = s->MV_dLength / num_diffs;
+            s->motion_diff_avg = s->mv_length_diff / num_diffs;
             s->motion_x_avg = s->mv_x_length / num_motion;
             s->motion_y_avg = s->mv_y_length / num_motion;
             s->motion_x_stdev = sqrt(0.00001 + s->mv_x_sum_sqr / num_motion - SQR(s->mv_x_length / num_motion));
             s->motion_y_stdev = sqrt(0.00001 + s->mv_y_sum_sqr / num_motion - SQR(s->mv_y_length / num_motion));
             s->motion_stdev = sqrt(0.00001 + s->mv_sum_sqr / num_motion - SQR(s->mv_length / num_motion));
             // TODO: Figure out how to best calculate motion_diff_stdev (MV_DifSumSQR and MV_DifSum don't exist anymore)
-            // s->motion_diff_stdev = sqrt(0.00001 + s->MV_DifSumSQR / num_diffs - pow(s->MV_DifSum / num_diffs, 2.0));
+            s->motion_diff_stdev = sqrt(0.00001 + s->mv_diff_sum_sqr / num_diffs - SQR(s->mv_length_diff / num_diffs));
         }
     }
 

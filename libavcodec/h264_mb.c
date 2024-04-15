@@ -809,7 +809,7 @@ static void mv_statistics_264(SharedFrameInfo* sf, H264SliceContext* sl, uint32_
     int ref_0_poc, ref_1_poc;
     int is_fwd, is_bwd;
     double norm_fwd, norm_bwd;
-    double mv_length_xy;
+    double mv_length_xy, mv_length_diff_xy;
     double mv_x, mv_y, mv_diff_x, mv_diff_y;
 
     curr_type = curr_type & 0xffff;
@@ -880,10 +880,13 @@ static void mv_statistics_264(SharedFrameInfo* sf, H264SliceContext* sl, uint32_
                 mv_diff_x /= dir_cnt;
                 mv_diff_y /= dir_cnt;
                 mv_length_xy = sqrt(SQR(mv_x) + SQR(mv_y));
+                mv_length_diff_xy = sqrt(SQR(mv_diff_x) + SQR(mv_diff_y));
                 sf->mv_length += mv_length_xy; // Add up of motion vector length for mean value
                 // sf->MV_dLength += mv_length_diff_xy; // Add up of motion vector length for mean value, MV_dLength doesn't exist anymore
+                sf->mv_length_diff += mv_length_diff_xy; // New variable
                 sf->mv_sum_sqr += SQR(mv_length_xy); //Add up square of motion vector length for variance value
                 // sf->MV_DifSumSQR += pow(mv_length_diff_xy, 2.0); // MV_DifSumSQR doesn't exist anymore
+                sf->mv_diff_sum_sqr += pow(mv_length_diff_xy, 2.0); // New variable
                 sf->mv_x_length += mv_x;
                 sf->mv_y_length += mv_y;
                 sf->mv_x_sum_sqr += SQR(mv_x);
