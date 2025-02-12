@@ -37,6 +37,7 @@
 #include "pixfmt.h"
 #include "version.h"
 
+#include "../../../VideoParser/include/shared.h" // videoparser
 
 /**
  * @defgroup lavu_frame AVFrame
@@ -305,6 +306,11 @@ enum AVFrameSideDataType {
      * The data is the AVDownmixMatrix struct defined in libavutil/downmix_info.h.
      */
     AV_FRAME_DATA_DOWNMIX_MATRIX,
+
+    /**
+     * Shared frame info by videoparser to be extracted later.
+     */
+    AV_FRAME_DATA_VIDEOPARSER_INFO,
 };
 
 enum AVActiveFormatDescription {
@@ -827,6 +833,22 @@ typedef struct AVFrame {
     enum AVAlphaMode alpha_mode;
 } AVFrame;
 
+/**
+ * @brief Get the Shared Frame Info object, with some calculations applied
+ * before returning it to the videoparser.
+ *
+ * @param frame The frame to get the shared frame info from.
+ * @return SharedFrameInfo*
+ */
+SharedFrameInfo *videoparser_get_shared_frame_info(AVFrame *frame);
+
+/**
+ * @brief Update the QP statistics for the shared frame info.
+ *
+ * @param frame The frame to update the QP statistics for.
+ * @param qp The QP value to update the statistics with.
+ */
+void videoparser_shared_frame_info_update_qp(AVFrame *frame, uint32_t qp);
 
 /**
  * Allocate an AVFrame and set its fields to default values.  The resulting
