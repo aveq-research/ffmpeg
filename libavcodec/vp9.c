@@ -1825,6 +1825,10 @@ finish:
         *got_frame = 1;
     }
 
+    // videoparser
+    // y-ac qp, (y-dc qp and uv qp are disregarded)
+    videoparser_shared_frame_info_update_qp(frame, s->s.h.yac_qi);
+
     return pkt->size;
 fail:
     ff_cbs_fragment_reset(&s->current_frag);
