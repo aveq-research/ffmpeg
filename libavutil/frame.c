@@ -84,6 +84,9 @@ static SharedFrameInfo *videoparser_init_shared_frame_info(AVFrame *frame) {
     sf->mv_y_length = 0;
     sf->mv_x_sum_sqr = 0;
     sf->mv_y_sum_sqr = 0;
+    sf->mv_length_diff = 0;
+    sf->mv_diff_sum = 0;
+    sf->mv_diff_sum_sqr = 0;
     sf->motion_avg = 0;
     sf->motion_stdev = 0;
     sf->motion_x_avg = 0;
