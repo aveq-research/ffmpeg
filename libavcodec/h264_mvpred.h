@@ -757,9 +757,7 @@ static void fill_decode_caches(const H264Context *h, H264SliceContext *sl, int m
             int8_t *ref_cache = &sl->ref_cache[list][scan8[0]];
             int8_t *ref       = h->cur_pic.ref_index[list];
             int16_t(*mv_cache)[2] = &sl->mv_cache[list][scan8[0]];
-            // FIXME: why is this int16_t and not uint8_t? The original type is uint8_t.
-            // But P.L. used pack8to16 to convert it to int16_t.
-            int16_t(*mvd_cache)[2] = &sl->mvd_cache[list][scan8[0]]; // videoparser
+            uint8_t(*mvd_cache)[2] = &sl->mvd_cache[list][scan8[0]]; // videoparser
             int16_t(*mv)[2]       = h->cur_pic.motion_val[list];
             if (!USES_LIST(mb_type, list))
                 continue;
