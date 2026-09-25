@@ -814,7 +814,7 @@ static void mv_statistics_264(SharedFrameInfo* sf, H264SliceContext* sl, uint32_
                               uint8_t* ref_L0, uint8_t* ref_L1, int width, int sub_stride, int frame_type) {
     int blk4, blk8, mv_idx, dir_cnt;
 #if VP_MV_POC_NORMALIZATION
-    int ref_0_poc, ref_1_poc;
+    int ref_0_idx, ref_1_idx, ref_0_poc, ref_1_poc;
 #endif
     int is_fwd, is_bwd;
     double norm_fwd, norm_bwd;
@@ -826,15 +826,30 @@ static void mv_statistics_264(SharedFrameInfo* sf, H264SliceContext* sl, uint32_
     for (blk8 = 0; blk8 < 4; blk8++) {
         sf->mb_mv_count += 4; // Includes DIRECT mode where no motion is coded, but default prediction is used
 #if VP_MV_POC_NORMALIZATION
-        ref_0_poc = sl->ref_list[0][ref_L0[scan8[blk8<<2]]].poc - ((sl->ref_list[0][ref_L0[scan8[blk8<<2]]].poc > 32768) ? 65536 : 0);
-        ref_1_poc = sl->ref_list[1][ref_L1[scan8[blk8<<2]]].poc - ((sl->ref_list[1][ref_L1[scan8[blk8<<2]]].poc > 32768) ? 65536 : 0);
+        // A negative reference index (LIST_NOT_USED) means that the 8x8 block
+        // does not use the list, and its motion vectors are zero. Its index
+        // would read outside ref_list, and a POC read from there that equals
+        // the current POC makes the norm infinite and the statistics NaN, so
+        // use a norm of 0 instead.
+        ref_0_idx = (int8_t)ref_L0[scan8[blk8<<2]];
+        ref_1_idx = (int8_t)ref_L1[scan8[blk8<<2]];
 
         if ((curr_type & MB_TYPE_L0) || (curr_type & MB_TYPE_DIRECT2)) {
-            norm_fwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_0_poc) / sf->poc_diff));
+            if (ref_0_idx >= 0) {
+                ref_0_poc = sl->ref_list[0][ref_0_idx].poc - ((sl->ref_list[0][ref_0_idx].poc > 32768) ? 65536 : 0);
+                norm_fwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_0_poc) / sf->poc_diff));
+            } else {
+                norm_fwd = 0.0;
+            }
         }
 
         if ((curr_type & MB_TYPE_L1) || (curr_type & MB_TYPE_DIRECT2)) {
-            norm_bwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_1_poc) / sf->poc_diff));
+            if (ref_1_idx >= 0) {
+                ref_1_poc = sl->ref_list[1][ref_1_idx].poc - ((sl->ref_list[1][ref_1_idx].poc > 32768) ? 65536 : 0);
+                norm_bwd = 1.0 / (2.0 * fabs(((double)sf->current_poc - (double)ref_1_poc) / sf->poc_diff));
+            } else {
+                norm_bwd = 0.0;
+            }
         }
 #else
         // No POC-based normalization - use raw motion vector values
