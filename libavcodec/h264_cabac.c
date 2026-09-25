@@ -1659,6 +1659,7 @@ decode_cabac_residual_internal(const H264Context *h, H264SliceContext *sl,
     cc.range     = sl->cabac.range;
     cc.low       = sl->cabac.low;
     cc.bytestream= sl->cabac.bytestream;
+    cc.bit_count = sl->cabac.bit_count; // videoparser
 #if !UNCHECKED_BITSTREAM_READER || ARCH_AARCH64
     cc.bytestream_end = sl->cabac.bytestream_end;
 #endif
@@ -1779,6 +1780,7 @@ decode_cabac_residual_internal(const H264Context *h, H264SliceContext *sl,
             sl->cabac.range     = cc.range     ;
             sl->cabac.low       = cc.low       ;
             sl->cabac.bytestream= cc.bytestream;
+            sl->cabac.bit_count = cc.bit_count; // videoparser
 #endif
 
 }
