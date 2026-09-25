@@ -75,6 +75,12 @@ typedef struct Mpeg12SliceContext {
     int last_dc[3];                ///< last DC values
 
     DECLARE_ALIGNED_32(int16_t, block)[12][64];
+
+    // videoparser: per-macroblock statistics, reset in mpeg_decode_mb()
+    int vp_mvd[8];           ///< coded MV differences of the current MB, as x/y pairs
+    int vp_mvd_cnt;          ///< number of entries in vp_mvd
+    uint32_t vp_motion_bits; ///< bits used for coding motion in the current MB
+    uint32_t vp_coef_bits;   ///< bits used for coding coefficients in the current MB
 } Mpeg12SliceContext;
 
 typedef struct Mpeg1Context {
@@ -101,14 +107,26 @@ typedef struct Mpeg1Context {
     int64_t timecode_frame_start;  /*< GOP timecode frame start number, in non drop frame format */
 } Mpeg1Context;
 
+// videoparser: store a coded MV difference and the bits used for coding it
+static inline void videoparser_record_mvd(Mpeg12SliceContext *const s, int mvd,
+                                          int start_bits)
+{
+    if (s->vp_mvd_cnt < FF_ARRAY_ELEMS(s->vp_mvd))
+        s->vp_mvd[s->vp_mvd_cnt++] = mvd;
+    s->vp_motion_bits += get_bits_count(&s->gb) - start_bits;
+}
+
 /* as H.263, but only 17 codes */
 static int mpeg_decode_motion(Mpeg12SliceContext *const s, int fcode, int pred)
 {
     int code, sign, val, shift;
+    const int vp_start_bits = get_bits_count(&s->gb); // videoparser
 
     code = get_vlc2(&s->gb, ff_mv_vlc, MV_VLC_BITS, 2);
-    if (code == 0)
+    if (code == 0) {
+        videoparser_record_mvd(s, 0, vp_start_bits); // videoparser
         return pred;
+    }
     if (code < 0)
         return 0xffff;
 
@@ -122,6 +140,7 @@ static int mpeg_decode_motion(Mpeg12SliceContext *const s, int fcode, int pred)
     }
     if (sign)
         val = -val;
+    videoparser_record_mvd(s, val, vp_start_bits); // videoparser
     val += pred;
 
     /* modulo decoding */
@@ -390,6 +409,7 @@ static inline int mpeg2_decode_block_intra(Mpeg12SliceContext *const s,
 
 static inline int get_dmv(Mpeg12SliceContext *const s)
 {
+    s->vp_motion_bits += 1 + show_bits1(&s->gb); // videoparser
     if (get_bits1(&s->gb))
         return 1 - (get_bits1(&s->gb) << 1);
     else
@@ -407,10 +427,16 @@ static int mpeg_decode_mb(Mpeg12SliceContext *const s, int *mb_skip_run)
     int i, j, k, cbp, val, mb_type, motion_type;
     const int mb_block_count = 4 + (1 << s->c.chroma_format);
     int ret;
+    int vp_start_bits; // videoparser
 
     ff_tlog(s->c.avctx, "decode_mb: x=%d y=%d\n", s->c.mb_x, s->c.mb_y);
 
     av_assert2(s->c.mb_skipped == 0);
+
+    // videoparser
+    s->vp_mvd_cnt     = 0;
+    s->vp_motion_bits = 0;
+    s->vp_coef_bits   = 0;
 
     if ((*mb_skip_run)-- != 0) {
         if (s->c.pict_type == AV_PICTURE_TYPE_P) {
@@ -509,6 +535,7 @@ static int mpeg_decode_mb(Mpeg12SliceContext *const s, int *mb_skip_run)
         }
         s->c.mb_intra = 1;
 
+        vp_start_bits = get_bits_count(&s->gb); // videoparser
         if (s->c.codec_id == AV_CODEC_ID_MPEG2VIDEO) {
             for (i = 0; i < mb_block_count; i++)
                 if ((ret = mpeg2_decode_block_intra(s, s->block[i], i)) < 0)
@@ -527,6 +554,7 @@ static int mpeg_decode_mb(Mpeg12SliceContext *const s, int *mb_skip_run)
                 }
             }
         }
+        s->vp_coef_bits += get_bits_count(&s->gb) - vp_start_bits; // videoparser
     } else {
         if (mb_type & MB_TYPE_ZERO_MV) {
             av_assert2(mb_type & MB_TYPE_CBP);
@@ -730,6 +758,7 @@ static int mpeg_decode_mb(Mpeg12SliceContext *const s, int *mb_skip_run)
                 return AVERROR_INVALIDDATA;
             }
 
+            vp_start_bits = get_bits_count(&s->gb); // videoparser
             if (s->c.codec_id == AV_CODEC_ID_MPEG2VIDEO) {
                 cbp <<= 12 - mb_block_count;
 
@@ -753,6 +782,7 @@ static int mpeg_decode_mb(Mpeg12SliceContext *const s, int *mb_skip_run)
                     cbp += cbp;
                 }
             }
+            s->vp_coef_bits += get_bits_count(&s->gb) - vp_start_bits; // videoparser
         } else {
             for (i = 0; i < 12; i++)
                 s->c.block_last_index[i] = -1;
@@ -1361,6 +1391,81 @@ static int mpeg_field_start(Mpeg1Context *s1, const uint8_t *buf, int buf_size)
  * @return DECODE_SLICE_ERROR if the slice is damaged,
  *         DECODE_SLICE_OK if this slice is OK
  */
+// videoparser
+#define SQR(_x_) ((_x_) * (_x_))
+
+/**
+ * videoparser: Update the QP, motion vector and bit count statistics of the
+ * current frame with the macroblock decoded last.
+ *
+ * Motion vectors are in half-pel units. The vertical component of field
+ * motion vectors in frame pictures is converted from field to frame lines.
+ * For bi-directional macroblocks, values from both directions are averaged.
+ */
+static void mb_statistics_mpeg12(Mpeg12SliceContext *const s)
+{
+    MPVContext *const c = &s->c;
+    AVFrame *const f    = c->cur_pic.ptr->f;
+    const int mb_type   = c->cur_pic.mb_type[c->mb_x + c->mb_y * c->mb_stride];
+    // MPEG-1 quantizer_scale is stored doubled by the decoder
+    const int qscale    = c->codec_id == AV_CODEC_ID_MPEG1VIDEO ? c->qscale >> 1 : c->qscale;
+    const int y_scale   = (c->picture_structure == PICT_FRAME &&
+                           (c->mv_type == MV_TYPE_FIELD || c->mv_type == MV_TYPE_DMV)) ? 2 : 1;
+    const int num_mvs   = (c->mv_type == MV_TYPE_16X8 ||
+                           (c->mv_type == MV_TYPE_FIELD && c->picture_structure == PICT_FRAME)) ? 2 : 1;
+    const int num_mvds  = s->vp_mvd_cnt >> 1;
+    SharedFrameInfo *sf;
+    int dir, i, dir_cnt = 0;
+    double mv_x = 0, mv_y = 0, mv_diff_x = 0, mv_diff_y = 0;
+    double mv_length_xy, mv_length_diff_xy;
+
+    videoparser_shared_frame_info_update_qp(f, qscale);
+
+    sf = videoparser_get_shared_frame_info(f);
+    sf->motion_bit_count += s->vp_motion_bits;
+    sf->coefs_bit_count  += s->vp_coef_bits;
+
+    if (IS_INTRA(mb_type) || IS_SKIP(mb_type))
+        return;
+
+    for (dir = 0; dir < 2; dir++) {
+        if (!(c->mv_dir & (MV_DIR_FORWARD << dir)))
+            continue;
+        dir_cnt++;
+        for (i = 0; i < num_mvs; i++) {
+            mv_x += FFABS(c->mv[dir][i][0]) / (double)num_mvs;
+            mv_y += FFABS(c->mv[dir][i][1]) * y_scale / (double)num_mvs;
+        }
+    }
+    if (!dir_cnt)
+        return;
+    mv_x /= dir_cnt;
+    mv_y /= dir_cnt;
+
+    for (i = 0; i < num_mvds; i++) {
+        mv_diff_x += FFABS(s->vp_mvd[2 * i]);
+        mv_diff_y += FFABS(s->vp_mvd[2 * i + 1]) * y_scale;
+    }
+    if (num_mvds) {
+        mv_diff_x /= num_mvds;
+        mv_diff_y /= num_mvds;
+    }
+
+    mv_length_xy      = sqrt(SQR(mv_x) + SQR(mv_y));
+    mv_length_diff_xy = sqrt(SQR(mv_diff_x) + SQR(mv_diff_y));
+
+    sf->mb_mv_count++;
+    sf->mv_coded_count  += num_mvds;
+    sf->mv_length       += mv_length_xy;
+    sf->mv_sum_sqr      += SQR(mv_length_xy);
+    sf->mv_length_diff  += mv_length_diff_xy;
+    sf->mv_diff_sum_sqr += SQR(mv_length_diff_xy);
+    sf->mv_x_length     += mv_x;
+    sf->mv_y_length     += mv_y;
+    sf->mv_x_sum_sqr    += SQR(mv_x);
+    sf->mv_y_sum_sqr    += SQR(mv_y);
+}
+
 static int mpeg_decode_slice(Mpeg12SliceContext *const s, int mb_y,
                              const uint8_t **buf, int buf_size)
 {
@@ -1469,6 +1574,8 @@ static int mpeg_decode_slice(Mpeg12SliceContext *const s, int mb_y,
         ret = mpeg_decode_mb(s, &mb_skip_run);
         if (ret < 0)
             return ret;
+
+        mb_statistics_mpeg12(s); // videoparser
 
         // Note motion_val is normally NULL unless we want to extract the MVs.
         if (s->c.cur_pic.motion_val[0]) {
