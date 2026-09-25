@@ -100,7 +100,8 @@ HEADERS = adler32.h                                                     \
           xtea.h                                                        \
           tea.h                                                         \
           tx.h                                                          \
-          video_hint.h
+          video_hint.h                                                  \
+          videoparser.h
 
 ARCH_HEADERS = bswap.h                                                  \
                intmath.h                                                \

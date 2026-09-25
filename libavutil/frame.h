@@ -37,7 +37,7 @@
 #include "pixfmt.h"
 #include "version.h"
 
-#include "../../../VideoParser/include/shared.h" // videoparser
+#include "videoparser.h" // videoparser
 #include "motion_vector.h" // videoparser
 
 /**
