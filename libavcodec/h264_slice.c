@@ -2671,9 +2671,8 @@ static int decode_slice(struct AVCodecContext *avctx, void *arg)
     int orig_deblock = sl->deblocking_filter;
     int ret;
 
-    // videoparser
-    static int prev_poc=0, poc_diff=-1; // Stores previous POC and POC difference (-1 = not yet calculated)
-    static int64_t prev_pts; // Stores previous Presentation Timestamp (PTS)
+    // videoparser: POC state of the decoder, which slices update in order
+    H264Context *vp = (H264Context *)sl->h264;
     int pts_diff; // Stores calculated difference between current and previous PTS
     H264Picture *curr_pic;
     AVFrame *frame;
@@ -2712,21 +2711,21 @@ static int decode_slice(struct AVCodecContext *avctx, void *arg)
     sf = videoparser_get_shared_frame_info(frame);
     sf->current_poc = curr_pic->poc - ((curr_pic->poc > 32768) ? 65536 : 0);
 
-    if (abs(sf->current_poc - prev_poc) != 0) {
+    if (abs(sf->current_poc - vp->vp_prev_poc) != 0) {
         int new_poc_diff;
         if ((frame->pts == 0) || (frame->duration == 0)) {
-            new_poc_diff = abs(sf->current_poc - prev_poc);
+            new_poc_diff = abs(sf->current_poc - vp->vp_prev_poc);
         } else {
-            pts_diff = FFMAX(1, (int)nearbyint(fabs((double)frame->pts - prev_pts) / (double)frame->duration));
-            new_poc_diff = abs(sf->current_poc - prev_poc) / pts_diff;
+            pts_diff = FFMAX(1, (int)nearbyint(fabs((double)frame->pts - vp->vp_prev_pts) / (double)frame->duration));
+            new_poc_diff = abs(sf->current_poc - vp->vp_prev_poc) / pts_diff;
         }
         // Set poc_diff: first time directly, afterwards take minimum
-        poc_diff = (poc_diff < 0) ? new_poc_diff : FFMIN(poc_diff, new_poc_diff);
+        vp->vp_poc_diff = (vp->vp_poc_diff < 0) ? new_poc_diff : FFMIN(vp->vp_poc_diff, new_poc_diff);
     }
 
-    sf->poc_diff = poc_diff; // -1 if not yet calculated
-    prev_poc = sf->current_poc;
-    prev_pts = frame->pts;
+    sf->poc_diff = vp->vp_poc_diff; // -1 if not yet calculated
+    vp->vp_prev_poc = sf->current_poc;
+    vp->vp_prev_pts = frame->pts;
 
     if (h->ps.pps->cabac) {
         /* realign */

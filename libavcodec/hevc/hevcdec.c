@@ -3615,8 +3615,6 @@ static int hevc_frame_start(HEVCContext *s, HEVCLayerContext *l,
 
     // videoparser: Track POC changes for HEVC
     {
-        static int prev_poc = 0, poc_diff = -1; // -1 = not yet calculated
-        static int64_t prev_pts = 0;
         int pts_diff;
         AVFrame *frame = s->cur_frame->f;
         SharedFrameInfo *sf = videoparser_get_shared_frame_info(frame);
@@ -3625,21 +3623,21 @@ static int hevc_frame_start(HEVCContext *s, HEVCLayerContext *l,
             // HEVC POC values are signed and can be negative, use directly
             sf->current_poc = s->poc;
 
-            if (abs(sf->current_poc - prev_poc) != 0) {
+            if (abs(sf->current_poc - s->vp_prev_poc) != 0) {
                 int new_poc_diff;
                 if ((frame->pts == 0) || (frame->duration == 0)) {
-                    new_poc_diff = abs(sf->current_poc - prev_poc);
+                    new_poc_diff = abs(sf->current_poc - s->vp_prev_poc);
                 } else {
-                    pts_diff = FFMAX(1, (int)nearbyint(fabs((double)frame->pts - prev_pts) / (double)frame->duration));
-                    new_poc_diff = abs(sf->current_poc - prev_poc) / pts_diff;
+                    pts_diff = FFMAX(1, (int)nearbyint(fabs((double)frame->pts - s->vp_prev_pts) / (double)frame->duration));
+                    new_poc_diff = abs(sf->current_poc - s->vp_prev_poc) / pts_diff;
                 }
                 // Set poc_diff: first time directly, afterwards take minimum
-                poc_diff = (poc_diff < 0) ? new_poc_diff : FFMIN(poc_diff, new_poc_diff);
+                s->vp_poc_diff = (s->vp_poc_diff < 0) ? new_poc_diff : FFMIN(s->vp_poc_diff, new_poc_diff);
             }
 
-            sf->poc_diff = poc_diff; // -1 if not yet calculated
-            prev_poc = sf->current_poc;
-            prev_pts = frame->pts;
+            sf->poc_diff = s->vp_poc_diff; // -1 if not yet calculated
+            s->vp_prev_poc = sf->current_poc;
+            s->vp_prev_pts = frame->pts;
         }
     }
 
@@ -4353,6 +4351,11 @@ static av_cold int hevc_init_context(AVCodecContext *avctx)
     HEVCContext *s = avctx->priv_data;
 
     s->avctx = avctx;
+
+    // videoparser
+    s->vp_prev_poc = 0;
+    s->vp_poc_diff = -1;
+    s->vp_prev_pts = 0;
 
     s->local_ctx = av_mallocz(sizeof(*s->local_ctx));
     if (!s->local_ctx)

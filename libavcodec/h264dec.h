@@ -587,6 +587,11 @@ typedef struct H264Context {
     int non_gray;                       ///< Did we encounter a intra frame after a gray gap frame
     int noref_gray;
     int skip_gray;
+
+    // videoparser: POC tracking of this decoder
+    int vp_prev_poc;                    ///< POC of the previous slice
+    int vp_poc_diff;                    ///< Smallest POC difference per frame so far; -1 if not yet known
+    int64_t vp_prev_pts;                ///< PTS of the previous slice
 } H264Context;
 
 extern const uint16_t ff_h264_mb_sizes[4];

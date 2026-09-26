@@ -31,6 +31,7 @@
 #include "libavutil/mem_internal.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/thread.h"
+#include "libavutil/videoparser.h" // videoparser
 
 #include "get_bits.h"
 #include "videodsp.h"
@@ -170,6 +171,12 @@ typedef struct VP9Context {
     int frame_extradata_pool_size;
 
     int webm_alpha_warned; ///< warn once about unsupported WebM alpha
+
+    // videoparser: statistics of the last invisible frame (legacy mode), for
+    // the show_existing_frame packet that displays it
+    SharedFrameInfo vp_hidden_frame_stats;
+    int vp_hidden_frame_distance;
+    int vp_hidden_stats_valid;  ///< Whether vp_hidden_frame_stats has valid data
 } VP9Context;
 
 struct VP9TileData {

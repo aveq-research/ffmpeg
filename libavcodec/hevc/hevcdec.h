@@ -586,6 +586,11 @@ typedef struct HEVCContext {
 
     AVBufferRef *rpu_buf;       ///< 0 or 1 Dolby Vision RPUs.
     DOVIContext dovi_ctx;       ///< Dolby Vision decoding context
+
+    // videoparser: POC tracking of this decoder
+    int vp_prev_poc;            ///< POC of the previous frame
+    int vp_poc_diff;            ///< Smallest POC difference per frame so far; -1 if not yet known
+    int64_t vp_prev_pts;        ///< PTS of the previous frame
 } HEVCContext;
 
 /**

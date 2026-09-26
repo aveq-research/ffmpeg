@@ -309,6 +309,11 @@ static int h264_init_context(AVCodecContext *avctx, H264Context *h)
     for (i = 0; i < FF_ARRAY_ELEMS(h->last_pocs); i++)
         h->last_pocs[i] = INT_MIN;
 
+    // videoparser
+    h->vp_prev_poc = 0;
+    h->vp_poc_diff = -1;
+    h->vp_prev_pts = 0;
+
     ff_h264_sei_uninit(&h->sei);
 
     if (avctx->active_thread_type & FF_THREAD_FRAME) {

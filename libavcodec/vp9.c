@@ -58,11 +58,8 @@
 #endif
 
 #if VP_MV_POC_NORMALIZATION
-// videoparser: Global state for VP9 hidden frame accumulation (legacy mode)
-// Replicates the VP9Hidden_FrmStat behavior from the legacy parser
-static SharedFrameInfo vp9_hidden_frame_stats;
-static int vp9_hidden_frame_distance = 0;
-static int vp9_hidden_stats_valid = 0;  // Whether vp9_hidden_frame_stats has valid data
+// videoparser: VP9 hidden frame accumulation (legacy mode) replicates the
+// VP9Hidden_FrmStat behavior of the legacy parser; its state is in VP9Context
 
 // videoparser: Copy SharedFrameInfo stats
 static void copy_shared_frame_stats(SharedFrameInfo *dst, const SharedFrameInfo *src) {
@@ -1704,15 +1701,15 @@ static int vp9_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         // For these frames, we need to:
         // 1. Copy the saved hidden frame stats
         // 2. Apply FrameDistance normalization
-        if (pkt->size < 100 && vp9_hidden_stats_valid) {
+        if (pkt->size < 100 && s->vp_hidden_stats_valid) {
             SharedFrameInfo *sf = videoparser_get_shared_frame_info(frame);
             if (sf) {
                 // Legacy: FrameDistance = max(1, FrameDistance - 2)
-                int fd = vp9_hidden_frame_distance - 2;
+                int fd = s->vp_hidden_frame_distance - 2;
                 if (fd < 1) fd = 1;
 
                 // Copy stats from hidden frame
-                copy_shared_frame_stats(sf, &vp9_hidden_frame_stats);
+                copy_shared_frame_stats(sf, &s->vp_hidden_frame_stats);
 
                 // Apply FrameDistance division (legacy normalization)
                 apply_frame_distance_division(sf, fd);
@@ -1935,16 +1932,16 @@ finish:
         if (sf) {
             if (s->s.h.invisible) {
                 // Invisible frame: Save stats for later use by show_existing_frame
-                copy_shared_frame_stats(&vp9_hidden_frame_stats, sf);
-                vp9_hidden_frame_stats.is_hidden = 1;
-                vp9_hidden_frame_distance = 0;
-                vp9_hidden_stats_valid = 1;
+                copy_shared_frame_stats(&s->vp_hidden_frame_stats, sf);
+                s->vp_hidden_frame_stats.is_hidden = 1;
+                s->vp_hidden_frame_distance = 0;
+                s->vp_hidden_stats_valid = 1;
 
                 // Mark the current frame's SharedFrameInfo as hidden
                 sf->is_hidden = 1;
             } else {
                 // Visible frame: Increment FrameDistance
-                vp9_hidden_frame_distance++;
+                s->vp_hidden_frame_distance++;
             }
         }
     }
@@ -1980,8 +1977,8 @@ static av_cold void vp9_decode_flush(AVCodecContext *avctx)
 
 #if VP_MV_POC_NORMALIZATION
     // videoparser: Reset hidden frame state on flush
-    vp9_hidden_frame_distance = 0;
-    vp9_hidden_stats_valid = 0;
+    s->vp_hidden_frame_distance = 0;
+    s->vp_hidden_stats_valid = 0;
 #endif
 
     if (FF_HW_HAS_CB(avctx, flush))
