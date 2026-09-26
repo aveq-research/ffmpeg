@@ -37,6 +37,11 @@
 // videoparser
 #define SQR(_x_) (_x_) * (_x_)
 
+// videoparser
+int videoparser_legacy_mode(void) {
+    return VP_MV_POC_NORMALIZATION ? 1 : 0;
+}
+
 /**
  * @brief Initialize the shared frame info for the videoparser, or return the existing one.
  *

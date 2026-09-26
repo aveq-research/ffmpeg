@@ -860,6 +860,15 @@ SharedFrameInfo *videoparser_get_final_shared_frame_info(AVFrame *frame);
 void videoparser_shared_frame_info_update_qp(AVFrame *frame, uint32_t qp);
 
 /**
+ * @brief Whether this build uses the legacy mode (VP_MV_POC_NORMALIZATION=1),
+ * which normalizes motion vectors by the temporal distance to the reference
+ * frame, as the legacy bitstream_mode3_videoparser does.
+ *
+ * @return 1 in legacy mode, 0 otherwise
+ */
+int videoparser_legacy_mode(void);
+
+/**
  * Allocate an AVFrame and set its fields to default values.  The resulting
  * struct must be freed using av_frame_free().
  *
