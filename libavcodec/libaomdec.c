@@ -56,6 +56,8 @@ typedef struct AV1DecodeContext {
     insp_frame_data insp_data;
     int insp_data_initialized;
     int insp_data_valid;  // Set when inspection callback has been called
+    // videoparser: Number of inspection callbacks during the current packet
+    int insp_count;
 #endif
 } AV1DecodeContext;
 
@@ -68,6 +70,7 @@ static void videoparser_av1_inspect_callback(void *pbi, void *user_data) {
         return;
 
     ctx->insp_data_valid = 0;
+    ctx->insp_count++;
 
     // Call ifd_inspect to fill the inspection data
     // Note: This captures MV, mode, and other per-block information
@@ -369,6 +372,54 @@ static void videoparser_av1_extract_mv_stats(AVFrame *picture, AV1DecodeContext 
 }
 #endif
 
+#ifdef AOM_CTRL_AV1_SET_INSPECTION_CALLBACK
+/**
+ * videoparser: Count skipped and coded blocks from AV1 inspection data.
+ *
+ * Counts are per MI unit (4x4 luma samples), clipped to the coded frame size,
+ * since the MI grid is aligned to 8 luma samples.
+ *
+ * - Skipped: inter block with skip mode, or with no residual (skip_txfm) and
+ *   no NEWMV component.
+ * - Coded: intra block (including intra block copy) or block with residual.
+ *   The QP of a coded block is its quantizer index with delta q and segment
+ *   offsets applied. Without these, it equals the frame QP.
+ *
+ * If the packet contains no decoded shown frame, the output frame shows an
+ * earlier decoded frame (show_existing_frame) and has no block data. All its
+ * blocks count as skipped.
+ */
+static void videoparser_av1_extract_block_stats(AVFrame *picture, AV1DecodeContext *ctx)
+{
+    const insp_frame_data *fd = &ctx->insp_data;
+
+    if (!ctx->insp_count || !ctx->insp_data_valid || !fd->mi_grid || !fd->show_frame) {
+        const int area = ((picture->width + 3) >> 2) * ((picture->height + 3) >> 2);
+        videoparser_shared_frame_info_update_blocks(picture, area, 1, 0);
+        return;
+    }
+
+    const int mi_rows = FFMIN(fd->mi_rows, (fd->height + 3) >> 2);
+    const int mi_cols = FFMIN(fd->mi_cols, (fd->width + 3) >> 2);
+
+    for (int mi_row = 0; mi_row < mi_rows; mi_row++) {
+        for (int mi_col = 0; mi_col < mi_cols; mi_col++) {
+            const insp_mi_data *mi = &fd->mi_grid[mi_row * fd->mi_cols + mi_col];
+            const int is_inter = mi->ref_frame[0] > INTRA_FRAME && !mi->intrabc;
+            const int has_newmv = mi->mode == NEWMV || mi->mode == NEW_NEWMV ||
+                                  mi->mode == NEAREST_NEWMV || mi->mode == NEW_NEARESTMV ||
+                                  mi->mode == NEAR_NEWMV || mi->mode == NEW_NEARMV;
+            const int skipped = is_inter && (mi->skip_mode || (mi->skip && !has_newmv));
+            const int coded = !is_inter || !mi->skip;
+
+            videoparser_shared_frame_info_update_blocks(picture, 1, skipped, coded);
+            if (coded)
+                videoparser_shared_frame_info_update_qp_coded(picture, mi->qindex);
+        }
+    }
+}
+#endif
+
 static int aom_decode(AVCodecContext *avctx, AVFrame *picture,
                       int *got_frame, AVPacket *avpkt)
 {
@@ -376,6 +427,11 @@ static int aom_decode(AVCodecContext *avctx, AVFrame *picture,
     const void *iter      = NULL;
     struct aom_image *img;
     int ret;
+
+#ifdef AOM_CTRL_AV1_SET_INSPECTION_CALLBACK
+    // videoparser
+    ctx->insp_count = 0;
+#endif
 
     if (aom_codec_decode(&ctx->decoder, avpkt->data, avpkt->size, NULL) !=
         AOM_CODEC_OK) {
@@ -461,6 +517,8 @@ static int aom_decode(AVCodecContext *avctx, AVFrame *picture,
 #ifdef AOM_CTRL_AV1_SET_INSPECTION_CALLBACK
         // videoparser: Extract MV statistics from inspection data
         videoparser_av1_extract_mv_stats(picture, ctx);
+        // videoparser: Extract skipped and coded block counts
+        videoparser_av1_extract_block_stats(picture, ctx);
 #endif
 
         *got_frame = 1;
