@@ -1351,6 +1351,8 @@ static int hls_transform_unit(HEVCLocalContext *lc,
                          (sps->chroma_format_idc == 2 &&
                          (cbf_cb[1] || cbf_cr[1]));
 
+        lc->cu.has_residual = 1; // videoparser
+
         if (pps->cu_qp_delta_enabled_flag && !lc->tu.is_cu_qp_delta_coded) {
             lc->tu.cu_qp_delta = ff_hevc_cu_qp_delta_abs(lc);
             if (lc->tu.cu_qp_delta != 0)
@@ -2698,6 +2700,7 @@ static int hls_coding_unit(HEVCLocalContext *lc, const HEVCContext *s,
     lc->cu.pred_mode        = MODE_INTRA;
     lc->cu.part_mode        = PART_2Nx2N;
     lc->cu.intra_split_flag = 0;
+    lc->cu.has_residual     = 0; // videoparser
 
     SAMPLE_CTB(l->skip_flag, x_cb, y_cb) = 0;
     for (x = 0; x < 4; x++)
@@ -2857,6 +2860,21 @@ static int hls_coding_unit(HEVCLocalContext *lc, const HEVCContext *s,
 
     // videoparser
     videoparser_shared_frame_info_update_qp(s->cur_frame->f, lc->qp_y);
+
+    // videoparser: Count the CU as skipped if cu_skip_flag is set, and as coded
+    // if it is intra (including PCM) or has at least one cbf set. Only coded
+    // CUs contribute to the coded QP statistics, since cu_qp_delta is only
+    // signaled when a cbf is set. Inter CUs with rqt_root_cbf = 0 (or with
+    // all cbfs 0) and coded motion are neither skipped nor coded.
+    {
+        int vp_skipped = lc->cu.pred_mode == MODE_SKIP;
+        int vp_coded   = lc->cu.pred_mode == MODE_INTRA || lc->cu.has_residual;
+        videoparser_shared_frame_info_update_blocks(s->cur_frame->f,
+                                                    (cb_size >> 2) * (cb_size >> 2),
+                                                    vp_skipped, vp_coded);
+        if (vp_coded)
+            videoparser_shared_frame_info_update_qp_coded(s->cur_frame->f, lc->qp_y);
+    }
 
     mb_statistics_hevc(s, lc, sps, x0, y0, log2_cb_size);
 

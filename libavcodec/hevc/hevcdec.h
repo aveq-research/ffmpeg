@@ -298,6 +298,9 @@ typedef struct CodingUnit {
     uint8_t intra_split_flag;   ///< IntraSplitFlag
     uint8_t max_trafo_depth;    ///< MaxTrafoDepth
     uint8_t cu_transquant_bypass_flag;
+
+    // videoparser: 1 if any transform unit of the CU has a cbf set
+    uint8_t has_residual;
 } CodingUnit;
 
 typedef struct Mv {
