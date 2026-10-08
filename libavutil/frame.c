@@ -113,6 +113,19 @@ static SharedFrameInfo *videoparser_init_shared_frame_info(AVFrame *frame) {
     sf->frame_distance = 0;
     sf->pts = 0;
 
+    // block counts and QP of coded blocks
+    sf->qp_coded_sum = 0;
+    sf->qp_coded_sum_sqr = 0;
+    sf->qp_coded_cnt = 0;
+    sf->blocks_total = 0;
+    sf->blocks_skipped = 0;
+    sf->blocks_coded = 0;
+    sf->qp_coded_min = UINT32_MAX;
+    sf->qp_coded_max = 0;
+    sf->qp_coded_avg = NAN;
+    sf->qp_coded_stdev = NAN;
+    sf->is_all_skip = 0;
+
     return sf;
 }
 
@@ -137,6 +150,27 @@ void videoparser_shared_frame_info_update_qp(AVFrame *frame, uint32_t qp) {
     sf->qp_sum_bb += qp;
     sf->qp_sum_sqr_bb += qp * qp;
     sf->qp_cnt_bb++;
+}
+
+void videoparser_shared_frame_info_update_blocks(AVFrame *frame, int area,
+                                                 int skipped, int coded) {
+    SharedFrameInfo *sf = videoparser_get_shared_frame_info(frame);
+
+    sf->blocks_total += area;
+    if (skipped)
+        sf->blocks_skipped += area;
+    if (coded)
+        sf->blocks_coded += area;
+}
+
+void videoparser_shared_frame_info_update_qp_coded(AVFrame *frame, uint32_t qp) {
+    SharedFrameInfo *sf = videoparser_get_shared_frame_info(frame);
+
+    sf->qp_coded_min = FFMIN(sf->qp_coded_min, qp);
+    sf->qp_coded_max = FFMAX(sf->qp_coded_max, qp);
+    sf->qp_coded_sum += qp;
+    sf->qp_coded_sum_sqr += (uint64_t)qp * qp;
+    sf->qp_coded_cnt++;
 }
 
 /**
@@ -193,6 +227,23 @@ SharedFrameInfo *videoparser_get_final_shared_frame_info(AVFrame *frame) {
     // }
 
     sf = (SharedFrameInfo *)side_data->data;
+
+    // QP statistics of coded blocks
+    if (sf->qp_coded_cnt > 0) {
+        sf->qp_coded_avg = (double)sf->qp_coded_sum / sf->qp_coded_cnt;
+        sf->qp_coded_stdev = sqrt(FFMAX(0.0, (double)sf->qp_coded_sum_sqr / sf->qp_coded_cnt -
+                                               sf->qp_coded_avg * sf->qp_coded_avg));
+    } else {
+        sf->qp_coded_min = 0;
+        sf->qp_coded_max = 0;
+        sf->qp_coded_avg = NAN;
+        sf->qp_coded_stdev = NAN;
+    }
+
+    // A codec may set is_all_skip itself (e.g. VP9 frames without block data)
+    if (frame->pict_type != AV_PICTURE_TYPE_I && sf->blocks_total > 0 &&
+        sf->blocks_skipped == sf->blocks_total)
+        sf->is_all_skip = 1;
 
     // should not happen, but we need to check to avoid division by zero
     if (sf->qp_cnt == 0) {

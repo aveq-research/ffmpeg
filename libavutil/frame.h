@@ -860,6 +860,26 @@ SharedFrameInfo *videoparser_get_final_shared_frame_info(AVFrame *frame);
 void videoparser_shared_frame_info_update_qp(AVFrame *frame, uint32_t qp);
 
 /**
+ * @brief Add a block to the block counts of the shared frame info.
+ *
+ * @param frame The frame the block belongs to.
+ * @param area Area of the block in units of 4x4 luma samples.
+ * @param skipped 1 if the block has no residual and no coded motion vector
+ * difference.
+ * @param coded 1 if the block is intra or has coded residual.
+ */
+void videoparser_shared_frame_info_update_blocks(AVFrame *frame, int area,
+                                                 int skipped, int coded);
+
+/**
+ * @brief Update the QP statistics of coded blocks for the shared frame info.
+ *
+ * @param frame The frame to update the QP statistics for.
+ * @param qp The QP value of a coded block.
+ */
+void videoparser_shared_frame_info_update_qp_coded(AVFrame *frame, uint32_t qp);
+
+/**
  * @brief Whether this build uses the legacy mode (VP_MV_POC_NORMALIZATION=1),
  * which normalizes motion vectors by the temporal distance to the reference
  * frame, as the legacy bitstream_mode3_videoparser does.

@@ -92,6 +92,28 @@ typedef struct SharedFrameInfo {
   int is_short_frame; /**< VP9: frame is show_existing_frame (pkt_size < 100) */
   int frame_distance; /**< VP9: distance from last invisible frame */
   int64_t pts;        /**< Presentation timestamp for FrmDist calculation */
+
+  // Block counts and QP of coded blocks
+  // INTERNAL -- stays in the struct
+  uint64_t qp_coded_sum;     /**< Sum of QP values of coded blocks */
+  uint64_t qp_coded_sum_sqr; /**< Sum of squared QP values of coded blocks */
+  uint32_t qp_coded_cnt;     /**< Count of QP values of coded blocks */
+
+  // EXTERNAL -- shared with videoparser
+  int blocks_total;   /**< Area of all blocks, in units of 4x4 luma samples */
+  int blocks_skipped; /**< Area of skipped blocks (no residual and no coded
+                         motion vector difference), in 4x4 units */
+  int blocks_coded;   /**< Area of intra blocks and blocks with coded
+                         residual, in 4x4 units */
+  uint32_t qp_coded_min; /**< Minimum QP of coded blocks; 0 without coded
+                            blocks */
+  uint32_t qp_coded_max; /**< Maximum QP of coded blocks; 0 without coded
+                            blocks */
+  double qp_coded_avg;   /**< Average QP of coded blocks; NaN without coded
+                            blocks */
+  double qp_coded_stdev; /**< Standard deviation of the QP of coded blocks;
+                            NaN without coded blocks */
+  int is_all_skip; /**< 1 for a non-I frame in which all blocks are skipped */
 } SharedFrameInfo;
 
 #endif /* AVUTIL_VIDEOPARSER_H */
