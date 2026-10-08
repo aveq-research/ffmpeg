@@ -952,6 +952,31 @@ void ff_h264_hl_decode_mb(const H264Context *h, H264SliceContext *sl)
     // Note: Currently treating all QPs as non-border for H.264
     videoparser_shared_frame_info_update_qp(h->cur_pic_ptr->f, sl->qscale);
 
+    // videoparser: Block counts, one macroblock is 16 units of 4x4 luma samples.
+    // Skipped: P_Skip, B_Skip, and B_Direct_16x16 or B_8x8 with only direct
+    // sub-macroblocks and cbp == 0 (no residual and no coded motion vector
+    // difference, like B_Skip).
+    // Coded: intra (including I_PCM and Intra16x16, whose DC is always coded)
+    // or cbp != 0.
+    {
+        int mb_coded   = IS_INTRA(mb_type) || (sl->cbp & 0x3F);
+        int mb_skipped = IS_SKIP(mb_type);
+
+        if (!mb_skipped && !mb_coded && sl->slice_type_nos == AV_PICTURE_TYPE_B) {
+            if (IS_DIRECT(mb_type))
+                mb_skipped = 1;
+            else if (IS_8X8(mb_type))
+                mb_skipped = IS_DIRECT(sl->sub_mb_type[0] & sl->sub_mb_type[1] &
+                                       sl->sub_mb_type[2] & sl->sub_mb_type[3]);
+        }
+
+        videoparser_shared_frame_info_update_blocks(h->cur_pic_ptr->f, 16,
+                                                    mb_skipped, mb_coded);
+        if (mb_coded)
+            videoparser_shared_frame_info_update_qp_coded(h->cur_pic_ptr->f,
+                                                          sl->qscale);
+    }
+
     // Motion vectors
     SharedFrameInfo *sf = videoparser_get_shared_frame_info(h->cur_pic_ptr->f);
     curr_pic = h->cur_pic_ptr;
