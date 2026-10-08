@@ -1261,6 +1261,36 @@ static av_always_inline void mask_edges(uint8_t (*mask)[8][4], int ss_h, int ss_
     }
 }
 
+// videoparser: Y-AC quantizer index of a segment (same rule as the qmul[] setup in vp9.c)
+static int vp_segment_yac_qi(const VP9Context *s, int seg_id)
+{
+    if (s->s.h.segmentation.enabled && s->s.h.segmentation.feat[seg_id].q_enabled) {
+        if (s->s.h.segmentation.absolute_vals)
+            return av_clip_uintp2(s->s.h.segmentation.feat[seg_id].q_val, 8);
+        return av_clip_uintp2(s->s.h.yac_qi + s->s.h.segmentation.feat[seg_id].q_val, 8);
+    }
+    return s->s.h.yac_qi;
+}
+
+// videoparser: Count the block area as skipped and/or coded, and add the QP of coded blocks.
+// Area is in 4x4 units, clipped to the picture, so that the frame total is
+// ceil(width / 4) * ceil(height / 4). Skipped: inter block without residual and
+// without a non-zero coded motion vector difference. Coded: intra block or block
+// with residual.
+static void vp_update_block_stats(const VP9Context *s, const VP9Block *b, AVFrame *f,
+                                  int row, int col, int w4, int h4, int has_residual)
+{
+    int cols4 = (s->w + 3) >> 2, rows4 = (s->h + 3) >> 2;
+    int area = FFMAX(0, FFMIN(cols4 - col * 2, w4 * 2)) *
+               FFMAX(0, FFMIN(rows4 - row * 2, h4 * 2));
+    int skipped = !b->intra && !has_residual && !b->vp_mvd_coded;
+    int coded = b->intra || has_residual;
+
+    videoparser_shared_frame_info_update_blocks(f, area, skipped, coded);
+    if (coded)
+        videoparser_shared_frame_info_update_qp_coded(f, vp_segment_yac_qi(s, b->seg_id));
+}
+
 void ff_vp9_decode_block(VP9TileData *td, int row, int col,
                          VP9Filter *lflvl, ptrdiff_t yoff, ptrdiff_t uvoff,
                          enum BlockLevel bl, enum BlockPartition bp)
@@ -1271,6 +1301,7 @@ void ff_vp9_decode_block(VP9TileData *td, int row, int col,
     int bytesperpixel = s->bytesperpixel;
     int w4 = ff_vp9_bwh_tab[1][bs][0], h4 = ff_vp9_bwh_tab[1][bs][1], lvl;
     int emu[2];
+    int has_residual = 0; // videoparser: block has non-zero coefficients
     AVFrame *f = s->s.frames[CUR_FRAME].tf.f;
 
     td->row = row;
@@ -1287,6 +1318,7 @@ void ff_vp9_decode_block(VP9TileData *td, int row, int col,
         b->bs = bs;
         b->bl = bl;
         b->bp = bp;
+        b->vp_mvd_coded = 0; // videoparser
         decode_mode(td);
         b->uvtx = b->tx - ((s->ss_h && w4 * 2 == (1 << b->tx)) ||
                            (s->ss_v && h4 * 2 == (1 << b->tx)));
@@ -1312,6 +1344,7 @@ void ff_vp9_decode_block(VP9TileData *td, int row, int col,
             }
             // videoparser: accumulate coefficient bits
             sf->coefs_bit_count += td->c->bit_count;
+            has_residual = has_coeffs;
 
             if (!has_coeffs && b->bs <= BS_8x8 && !b->intra) {
                 b->skip = 1;
@@ -1354,6 +1387,9 @@ void ff_vp9_decode_block(VP9TileData *td, int row, int col,
             case 8: SPLAT_ZERO_YUV(td->left, nnz_ctx, row7, 8, v); break;
             }
         }
+
+        // videoparser: runs once per block (pass 0, or the first of two passes)
+        vp_update_block_stats(s, b, f, row, col, w4, h4, has_residual);
 
         if (s->pass == 1) {
             s->td[0].b++;

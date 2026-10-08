@@ -719,5 +719,9 @@ void ff_vp9_fill_mv(VP9TileData *td, VP9mv *mv, int mode, int sb)
         // videoparser: accumulate MV statistics for inter blocks
         // Pass block size, sub-block index, skip flag, and coded_mv_cnt for proper counting in legacy mode
         mv_statistics_vp9(sf, mv, b->comp, mvd_x, mvd_y, is_newmv, frm_dist, b->bs, sb, b->skip, coded_mv_cnt);
+
+        // videoparser: mark the block as having a coded motion vector difference
+        if (coded_mv_cnt)
+            b->vp_mvd_coded = 1;
     }
 }

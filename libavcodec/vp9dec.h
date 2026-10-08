@@ -91,6 +91,7 @@ typedef struct VP9Block {
     enum TxfmMode tx, uvtx;
     enum BlockLevel bl;
     enum BlockPartition bp;
+    uint8_t vp_mvd_coded; // videoparser: block has a non-zero coded motion vector difference
 } VP9Block;
 
 typedef struct VP9TileData VP9TileData;

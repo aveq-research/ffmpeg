@@ -93,6 +93,40 @@ static void apply_frame_distance_division(SharedFrameInfo *sf, int frame_distanc
 }
 #endif
 
+// videoparser: Give a shown existing frame its own copy of the statistics of the
+// frame it repeats, and count its whole area as skipped. The frame has no block
+// data and no coded QP; a non-I frame is reported as all-skip.
+static void vp_set_repeated_frame_stats(AVFrame *frame)
+{
+    AVFrameSideData *sd = av_frame_get_side_data(frame, AV_FRAME_DATA_VIDEOPARSER_INFO);
+    SharedFrameInfo old, init, *sf;
+    int has_old = 0;
+
+    if (sd) {
+        memcpy(&old, sd->data, sizeof(old));
+        has_old = 1;
+        av_frame_remove_side_data(frame, AV_FRAME_DATA_VIDEOPARSER_INFO);
+    }
+    sf = videoparser_get_shared_frame_info(frame);
+    if (!sf)
+        return;
+    if (has_old) {
+        init = *sf;
+        *sf = old;
+        sf->qp_coded_sum = init.qp_coded_sum;
+        sf->qp_coded_sum_sqr = init.qp_coded_sum_sqr;
+        sf->qp_coded_cnt = init.qp_coded_cnt;
+        sf->qp_coded_min = init.qp_coded_min;
+        sf->qp_coded_max = init.qp_coded_max;
+        sf->qp_coded_avg = init.qp_coded_avg;
+        sf->qp_coded_stdev = init.qp_coded_stdev;
+    }
+    sf->blocks_total = ((frame->width + 3) >> 2) * ((frame->height + 3) >> 2);
+    sf->blocks_skipped = sf->blocks_total;
+    sf->blocks_coded = 0;
+    sf->is_all_skip = frame->pict_type != AV_PICTURE_TYPE_I;
+}
+
 #if HAVE_THREADS
 DEFINE_OFFSET_ARRAY(VP9Context, vp9_context, pthread_init_cnt,
                     (offsetof(VP9Context, progress_mutex)),
@@ -1693,6 +1727,9 @@ static int vp9_decode_frame(AVCodecContext *avctx, AVFrame *frame,
         frame->pts     = pkt->pts;
         frame->pkt_dts = pkt->dts;
         *got_frame = 1;
+
+        // videoparser: statistics of the repeated frame (before the legacy handling below)
+        vp_set_repeated_frame_stats(frame);
 
 #if VP_MV_POC_NORMALIZATION
         // videoparser: Handle show_existing_frame (short frame) in legacy mode
